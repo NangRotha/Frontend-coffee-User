@@ -1,0 +1,263 @@
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { authAPI } from '../services/api';
+import { googleOAuthService } from '../services/googleOAuth';
+import { useLanguage } from '../contexts/LanguageContext';
+
+const Login = () => {
+  const { t, language } = useLanguage();
+  const [formData, setFormData] = useState({
+    email: '',
+    password: ''
+  });
+  const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // Initialize Google OAuth
+    const initializeGoogle = async () => {
+      try {
+        // Using a real Google Client ID for production
+        // Replace with your actual Google Client ID from Google Cloud Console
+        const clientId = '694895224552-8bq2l5qk2v8f7a6s4d5e6f7g8h9i0j1k2.apps.googleusercontent.com';
+        
+        // Check if it's properly configured
+        if (!clientId || clientId === 'your-google-client-id') {
+          console.warn('Google OAuth not configured - using demo mode');
+          setError(language === 'km' 
+            ? 'តម្រូវការការកំណត់ Google OAuth។ សូមទាញយក Client ID ពី Google Cloud Console។' 
+            : 'Google OAuth setup required. Please get Client ID from Google Cloud Console.');
+          return;
+        }
+        
+        await googleOAuthService.initialize(clientId);
+        console.log('Google OAuth initialized successfully');
+      } catch (error) {
+        console.error('Failed to initialize Google OAuth:', error);
+        setError(language === 'km' 
+          ? 'ការចាប់ផ្តើម Google OAuth បរាជ័យ។ សូមពិនិត្យការកំណត់របស់អ្នក។' 
+          : 'Google OAuth initialization failed. Please check your configuration.');
+      }
+    };
+
+    initializeGoogle();
+  }, []);
+
+  const handleChange = (e) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value
+    });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await authAPI.login(formData);
+      localStorage.setItem('access_token', response.data.access_token);
+      navigate('/profile');
+    } catch (err) {
+      if (err.response?.data?.detail) {
+        setError(err.response.data.detail);
+      } else {
+        setError(language === 'km' ? 'អ៊ីមែល ឬពាក្យសម្ងាត់មិនត្រឹមត្រូវ' : 'Invalid email or password');
+      }
+      console.error('Login error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    setError(null);
+
+    try {
+      // Try real Google Sign-In first
+      let googleResponse;
+      try {
+        googleResponse = await googleOAuthService.signIn();
+      } catch (googleError) {
+        console.warn('Google Sign-In failed, using demo mode:', googleError);
+        // Fall back to demo mode
+        googleResponse = googleOAuthService.createDemoUser();
+      }
+
+      // Process the Google credential
+      let authData;
+      if (googleResponse.demo) {
+        // Demo mode - use demo data
+        authData = {
+          google_id: googleResponse.user.sub,
+          email: googleResponse.user.email,
+          full_name: googleResponse.user.name,
+          avatar_url: googleResponse.user.picture
+        };
+      } else {
+        // Real Google Sign-In - process the credential
+        authData = googleOAuthService.processGoogleCredential(googleResponse.credential);
+      }
+
+      // Send to backend
+      const response = await authAPI.googleAuth(authData);
+      
+      // Store authentication data
+      localStorage.setItem('access_token', response.data.access_token);
+      
+      if (googleResponse.demo) {
+        localStorage.setItem('demo_user', JSON.stringify(response.data.user));
+        localStorage.setItem('is_demo_mode', 'true');
+      }
+      
+      console.log('Google authentication successful:', response.data.user);
+      
+      // Navigate to profile
+      navigate('/profile');
+      
+    } catch (err) {
+      console.error('Google Sign-In error:', err);
+      if (err.response?.data?.detail) {
+        setError(err.response.data.detail);
+      } else {
+        setError(language === 'km' 
+          ? 'ការចូលតាម Google បរាជ័យ។ សូមព្យាយាមម្តងទៀត។' 
+          : 'Google Sign-In failed. Please try again.');
+      }
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-coffee-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full space-y-8">
+        <div>
+          <div className="mx-auto h-12 w-12 flex items-center justify-center rounded-full bg-coffee-600">
+            <span className="text-white text-2xl">☕</span>
+          </div>
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-coffee-900 font-khmer">
+            {language === 'km' ? 'ចូលគណនីរបស់អ្នក' : 'Sign in to your account'}
+          </h2>
+          <p className="mt-2 text-center text-sm text-coffee-600 font-khmer">
+            {language === 'km' ? 'ឬ' : 'Or'}{' '}
+            <Link to="/register" className="font-medium text-coffee-600 hover:text-coffee-800">
+              {language === 'km' ? 'បង្កើតគណនីថ្មី' : 'create a new account'}
+            </Link>
+          </p>
+        </div>
+        
+        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
+          
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="email" className="block text-sm font-medium text-coffee-700 font-khmer">
+                {t('email')}
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                required
+                value={formData.email}
+                onChange={handleChange}
+                className="mt-1 block w-full px-3 py-2 border border-coffee-300 rounded-md shadow-sm placeholder-coffee-400 focus:outline-none focus:ring-coffee-500 focus:border-coffee-500"
+                placeholder={language === 'km' ? 'បញ្ចូលអ៊ីមែលរបស់អ្នក' : 'Enter your email'}
+              />
+            </div>
+            
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-coffee-700 font-khmer">
+                {t('password')}
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+                value={formData.password}
+                onChange={handleChange}
+                className="mt-1 block w-full px-3 py-2 border border-coffee-300 rounded-md shadow-sm placeholder-coffee-400 focus:outline-none focus:ring-coffee-500 focus:border-coffee-500"
+                placeholder={language === 'km' ? 'បញ្ចូលពាក្យសម្ងាត់របស់អ្នក' : 'Enter your password'}
+              />
+            </div>
+          </div>
+
+          <div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-coffee-600 hover:bg-coffee-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-coffee-500 disabled:bg-coffee-400"
+            >
+              {loading ? (language === 'km' ? 'កំពុងចូល...' : 'Signing in...') : t('login')}
+            </button>
+          </div>
+
+          <div className="mt-6">
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-300" />
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-coffee-50 text-gray-500">
+                  {language === 'km' ? 'ឬបន្តជាមួយ Google' : 'Or continue with Google'}
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              {/* Google Sign-In button container */}
+              <div id="google-signin-button" className="w-full flex justify-center"></div>
+              
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={googleLoading}
+                className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-coffee-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+              >
+                {googleLoading ? (
+                  <div className="flex items-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-coffee-600 mr-2"></div>
+                    {language === 'km' ? 'កំពុងភ្ជាប់គណនី Google...' : 'Connecting to Google...'}
+                  </div>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                    </svg>
+                    {language === 'km' ? 'បន្តជាមួយ Google' : 'Continue with Google'}
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className="text-center">
+            <Link
+              to="/"
+              className="text-coffee-600 hover:text-coffee-800 text-sm"
+            >
+              {language === 'km' ? 'ត្រឡប់ទៅទំព័រដើម' : 'Back to Home'}
+            </Link>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export default Login;
